@@ -1,4 +1,5 @@
-﻿% Red Hat Enterprise Linux 7 -- Identity Management Quickstart
+﻿# Red Hat Enterprise Linux 7 -- Identity Management Quickstart
+
 # Introduction
 Lorem ipsum dolor sit amet, te mundi fabellas duo, iusto principes has ne, solum efficiantur accommodare cu eam. Meis suscipiantur complectitur cu mea, te adhuc posse nam. Dico etiam antiopam et est, ne posse iuvaret mnesarchum pro. Vel aperiri delicata an, ea sit vitae fuisset. An populo feugait qui.
 
