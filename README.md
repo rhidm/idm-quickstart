@@ -5,11 +5,11 @@ Lorem ipsum dolor sit amet, te mundi fabellas duo, iusto principes has ne, solum
 
 # Table of Contents
 ## Basic Deployment
-* [Prerequisites](00-prerequisites.md)
-* [Installation of Red Hat Identity Management](01-installation.md)
-* [Managing Identity: Users, Hosts, and Groups](02-managing-identity.md)
-* [Joining Clients](03-joining-clients.md)
-* [Managing Policy](04-managing-policy.md)
+* [Prerequisites](sections/00-prerequisites.md)
+* [Installation of Red Hat Identity Management](sections/01-installation.md)
+* [Managing Identity: Users, Hosts, and Groups](sections/02-managing-identity.md)
+* [Joining Clients](sections/03-joining-clients.md)
+* [Managing Policy](sections/04-managing-policy.md)
 * Delegating IdM Privileges (RBAC)
 
 ## Advanced Topics
