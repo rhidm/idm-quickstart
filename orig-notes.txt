@@ -1,0 +1,452 @@
+﻿Red Hat Enterprise Linux 7 -- Identity Management
+Table of Contents
+Section 0: Demonstration Lab Environment	1
+Module 0.1: Prerequisites and Preparation [RHEL6 RHEL7]	2
+Module 0.2: Load Demonstration Content	2
+Section 1: Identity & Policy in the RHEL 7 IdM environment	4
+Module 1.1: User and Group management from the command line	4
+Module 1.2: User and Group management from the Web UI	5
+Module 1.3: IdM Role Based Access Control	5
+Section 2: RHEL 7 Systems Joining the IdM environment	7
+Module 2.1: Joining a RHEL 7 system to the IdM environment	7
+Module 2.2: Automount	8
+Module 2.3: Host Based Access Control	8
+Module 2.3: Sudo	9
+Module 2.4: (Optional) Joining a RHEL 6 system to the IdM environment	10
+Section 3: (Optional) Active Directory	10
+Module 3.0: “Direct” AD access with SSSD, realmd, and Active Directory	10
+Module 3.1: “Indirect” AD access with IdM and Active Directory	11
+Section 4: (Optional) Expanding the IdM Environment	12
+Module 7.1: Install IdM Replica	12
+Section 0: Demonstration Lab Environment
+Note that if preparing for a customer demo, this section should generally be executed ahead of time. However, this first section should only take about 15 minutes, and may function as a good demonstration of how quickly IdM can be installed and configured.
+Three systems are required for this lab:
+idm-1.example.com - this system will run the RHEL 7 IdM server.
+www-7.example.com - this system will function as a RHEL7 client to the IdM server.
+A desktop with an SSH client and web browsers (Firefox recommended).
+Optionally, one or more of these additional systems can be used to demonstrate additional functionality:
+idm-2.example.com - this system will serve as demonstration of the full installation process of a replica.
+rhel6.example.com - this system will serve as a demonstration of the full installation processes of a RHEL6 client.
+All systems used for this lab can be physical or virtual.  This guide was developed using RHEL-7.0-20140326.0-Server-x86_64-dvd1.iso on KVM with virt-manager.
+If the systems acquire IP via DHCP, it is necessary that the IP addresses for idm-1 and (optionally) idm-2 remain constant for the duration of the lab.  It is also important to identify the IP address for idm-1, as this will need to be specified as the DNS server for all other systems.
+All systems require the same resources: 1 CPU, 512MB RAM, 6GB Disk, 1 NIC named eth0.
+All systems must have network connectivity to each other.
+The complete demonstration IdM environment has the following configuration:
+Users (All passwords are “password”)
+admin, user1, user2, user3, power1, help1
+Groups
+demo-users: user1, user2, user3 (Automember: any users with Last Name = “Demo”)
+web-admins: power1
+helpdesk-admins:help1
+power-users: power1
+Hosts
+www-1, www-2, www-3, ftp-1
+Host Groups
+www-servers: www-1, www-2, www-3 (Automember: any hosts with hostname = “www*”)
+Host-Based Access Control
+web-admns are allowed to SSH into www-servers
+demo-users can SSH into all servers
+Sudo
+power-users can run lvs,vgs,pvs  via sudo on all systems
+Automount
+idm-1 functions as an NFS server, providing automountable home directories for all users
+Module 0.1: Prerequisites and Preparation [RHEL6 RHEL7]
+Activity: Install idm-1.example.com
+Install this first system using the kickstart located at http://people.redhat.com/matsmith/idm-1.ks . Root password is “password”.  Enter IP address of this server for idm-1.example.com entry in /etc/hosts of your desktop.
+
+Activity: Install www-7.example.com
+Install this first system using the kickstart located at http://people.redhat.com/matsmith/www-7.ks . Root password is “password”.  Enter the IP address of this server for www-7.example.com entry in /etc/hosts of your desktop.
+
+Activity: (Optional) Install idm-2.example.com
+Install this system as a RHEL7 Minimal Install.  Register this system to RHN/RHSM/Satellite, or mount the RHEL7 CD and configure as a YUM repo.
+
+Activity: (Optional) Install rhel6.example.com
+Install this system as a RHEL6 Minimal Install.  Register this system to RHN/RHSM/Satellite, or mount the RHEL6 CD and configure as a YUM repo.
+Module 0.2: Load Demonstration Content
+The kickstart process leaves a script named /root/ipa-load-demo. Run this script to install the IdM server, and create several user, group, and policy entries in the IdM environment.  Review this script as an example of how to automate using IdM's ipa CLI interface.
+[root@idm-1 ~]# /root/ipa-load-demo
+
+Confirm successful installation by  obtaining a TGT for the admin user.  Note that the capitalization of EXAMPLE.COM!
+[root@idm-1 ~]# kinit admin@EXAMPLE.COM
+Password for admin@EXAMPLE.COM: password
+
+[root@idm-1 ~]# klist
+...
+01/01/2014 08:00:00  01/02/2014 08:00:00  krbtgt/EXAMPLE.COM@EXAMPLE.COM
+
+Confirm that the directory services are properly responding, and that the IdM server is a member of it's own environment.  
+[root@idm-1 ~]# getent passwd user
+user3:*:1635800007:1635800007:User3 Demo:/home/user3:/bin/bash 
+
+[root@idm-1 ~]# getent group demo-users
+demo-users:*:1635800011:user1,user2,user3
+
+Confirm that the web admin interface is available by opening a browser session to http://idm-1.example.com (Note: your client must properly resolve idm-1.example.com.  Using the IP directly in the URL will not work.).   You should see the IdM login screen.
+
+
+
+Login as admin to confirm that you see the IdM web interface.
+
+
+
+Section 1: Identity & Policy in the RHEL 7 IdM environment
+Red Hat IdM provides both a Web UI and CLI, allowing the management of users and groups either graphically or from the command line.  This section will explore both methods, resulting in a environment with several users and groups for use in later modules.
+Customers will want to see that they can provide a graphical UI to junior admins or non-IT personnel for simple tasks, while also using a more powerful CLI for scripting and automation.  They will also see convenience features like automembership (adding users or hosts to groups automatically, based on some attribute) and Role Based Access Control which allows for granular delegation of specific IdM actions (such as changing passwords).
+Module 1.1: User and Group management from the command line
+This module will explore managing users and groups using the ipa command.  ipa can be used interactively for individual activities, or fully non-interactively to facilitate scripting.  This command can be run from any RHEL system that is joined to the IdM environment and has the ipa-admintools package installed.
+Activity: Create a user interactively from the command line,
+SSH as root into idm-1 and kinit as admin@EXAMPLE.COM to perform the following activities.
+
+Run the ipa user-add command to interactively create a new user account:
+[root@idm-1 ~]# ipa user-add 
+First name: User10
+Last name: Demo
+User login [uusers]: user10
+------------------
+Added user "user10"
+------------------
+...
+ Member of groups: ipausers, demo-users
+...
+
+Activity: Explore Automembership
+In the above activity, note the “Member of groups” -- the “ipa-load-demo” script created a “group automembership rule”, which automatically makes any users with a last name of “Demo” part of the “demo-users” group.  Note that any attribute can be used for automember.
+# Create a automember user group to capture all users with a last name of "Users"
+ipa group-add --desc="Demo Users" demo-users
+ipa automember-add --type=group demo-users
+ipa automember-add-condition --type=group --key=sn --inclusive-regex=^Demo$ demo-users
+
+Activity: Create a user non-interactively from the command line
+SSH as root into idm-1 and kinit as admin@EXAMPLE.COM to perform the following activities.
+
+Run the ipa user-add command, supplying all information as parameters.  Note the “title” and “email” attributes supplied here are optional.  Note again the automembership.  Note that this non-interactive usage makes scripting quite simple.
+[root@idm-1 ~]# ipa user-add user11 --first=User11 --last=Demo --email=cooluser@example.com --title="CIO Example Corp"
+------------------
+Added user "user11"
+------------------
+...
+   Member of groups: ipausers, demo-users
+...
+
+Activity: Create groups from the command line
+SSH as root into idm-1 and kinit as admin@EXAMPLE.COM to perform the following activities.
+
+Run the ipa group-add command to create a new group, and ipa group-add-member to populate the group:
+[root@idm-1 ~]# ipa group-add vip-users --desc "VIP Group" 
+----------------------- 
+Added group "vip-users" 
+----------------------- 
+...
+
+[root@idm-1 ~]# ipa group-add-member vip-users --users=user1 --users=user2
+  Group name: vip-users 
+...
+Number of members added 2
+
+Note that multiple members are supplied by repeated invocation of the --users parameter.  This is a change from IdM in RHEL 6, which accepted comma-delimited values in a single parameter.
+
+Administratively reset the password of user3:
+[root@idm-1 ~]# ipa passwd user3
+
+Obtain a kerberos TGT for user1, noting that the above administrative reset forces the user to change their password - this ensures that only the user knows their own password.
+[root@idm-1 ~]# kinit user3
+Password for user1@EXAMPLE.COM: 
+Password expired.  You must change it now. 
+Enter new password: 
+Enter it again: 
+Module 1.2: User and Group management from the Web UI
+This module will explore managing users and groups using IdM's Web UI.
+Activity: Manage Users and Groups using the Web UI
+Open a browser session to idm-1 and login in as admin to perform the following activities.
+Display the users that exist in the “Users” Panel, the Groups in the “User Groups” panel.  Feel free to click “Add” and create a new user or group, showing how simple this interface is, suitable for delegation to a junior admin or a non-technical administrator. 
+     
+
+Module 1.3: IdM Role Based Access Control
+This module will show how privileges within IdM can be granularly delegated, allowing a subset of actions to be performed by specific users.
+Activity: Display how a Help Desk user can login to change passwords.
+Open a browser session to idm-1 and login in as help1 to perform the following activities.
+Show the “Users” panel.  Click on user user3 and change the password.
+Show the “Hosts” panel.  Click on any host, and show how the fields and actions are all disabled.  help1 only has access to modify users and change their group membership.
+Show the “IPA Server” tab, “Role Based Access Control” panel.  Click on “ROLES”, and show the built-in roles, noting that custom roles can also be created.  Click on the “helpdesk” role, and note the “helpdesk-admins” group under the “User Groups” tab.  Continue to the “Privileges” tab to show the limited privileges granted to this “helpdesk” role.
+
+Note that this role was granted to the helpdesk group, containing the help1 user, using the following from in the ipa-load-demo script:
+ipa role-add-member --groups=helpdesk-admins helpdesk
+Section 2: RHEL 7 Systems Joining the IdM environment
+RHEL 7 introduces the new realmd package, including the realm command.  Installation of realmd and issuance of the realm command is a very easy process, resulting in the joining of a RHEL 7 system to the IdM environment.
+
+Customers will want to understand how simple the process of joining RHEL 7 and the type of policy management that is possible.
+Module 2.1: Joining a RHEL 7 system to the IdM environment
+Activity: Use realmd to join a RHEL 7 system to IdM
+SSH as root into www-7 to perform the following activities.
+Edit /etc/resolv.conf to specify the IP address of idm-1 as the nameserver, and confirm proper name resolution by pinging idm-1.example.com
+Discover the example.com IdM domain, noting that this command displays both the type of remote server (server-software: ipa), and the software required for this client to join.  Note that the process would be exactly the same for joining and Active Directory, and realm would display the software necessary to install (required-packages) for this client to join the AD.
+[root@www-7 ~]# realm discover example.com 
+example.com 
+  type: kerberos 
+  realm-name: EXAMPLE.COM 
+  domain-name: example.com 
+  configured: no 
+  server-software: ipa 
+  client-software: sssd 
+  required-package: ipa-client 
+  required-package: oddjob 
+  required-package: oddjob-mkhomedir 
+  required-package: sssd 
+
+Join www-7 to the IdM environment.  Note that this can be delegated to another user; but this using admin for simplicity of lab.
+[root@www-7 ~]# realm join example.com 
+Password for admin: <Enter password>
+
+If the join is successful, there will be no output.  
+Edit /etc/sssd/sssd.conf to disable the default requirement for fully qualified user names.  Otherwise, all user names must include @example.com when logging in or querying.  This option is useful to set “True” when a host is joint to multiple domains.
+[domain/example.com] 
+... 
+use_fully_qualified_names = False 
+...
+
+Restart sssd to make this new setting take effect:
+[root@www-7 ~]# systemctl restart sssd 
+
+Use getent to verify that this system now sees user from the IdM environment.
+[root@www-7 ~]# getent passwd user2
+user2@example.com:*:1635800006:1635800006:User2 Demo:/home/user2:/bin/bash 
+
+Note that joining this system to IdM automatically added it to the www-servers hostgroup.
+[power1@example.com@www-7 ~]$ getent netgroup www-servers 
+www-servers           (www-3.example.com,-,example.com) (www-7.example.com,-,example.com) (www-2.example.com,-,example.com) (www-1.example.com,-,example.com)
+
+This automembership rule was created by the ipa-load-demo script.  Note that this example keys on the host name (“cn”), but any attribute can be used.  RHEL 7 IdM includes the userClass attribute, which can be used for arbitrary classification of hosts, effectively allowing for a tagging system.
+ipa hostgroup-add --desc="WWW Servers" "www-servers"
+ipa automember-add --type=hostgroup "www-servers"
+ipa automember-add-condition --type=hostgroup --key=cn --inclusive-regex=^www "www-servers"
+Module 2.2: Automount
+Activity: Configure www-7 to automount home directories served via NFS from idm-1
+SSH as root into www-7 to perform the following activities.
+[root@www-7 ~]# ipa-client-automount -U 
+Searching for IPA server... 
+...
+Started autofs 
+
+Check the automount maps to verify they are being provided by IdM:
+[root@www-7 ~]# automount -m 
+
+autofs dump map information 
+=========================== 
+
+...
+Mount point: /home 
+...
+  instance type(s): sss 
+  map: auto.home 
+
+  * | -rw,soft,fstype=nfs4 idm-1.example.com:/exports/homes/& 
+
+Note in the above that the “instance type” is “sss”, and the configuration of the mount.  This map was created by following commands (also viewable in Web UI at Policy->Automount):
+ipa automountkey-add default auto.master  --key="/home" --info="auto.home" 
+ipa automountmap-add  default auto.home
+ipa automountkey-add default auto.home --key="*" --info="rw,soft,fstype=nfs4 \
+  idm-1.example.com:/exports/homes/&"
+
+Now log out, and SSH as power1
+[user@client ~]$ ssh power1@www-7.example.com
+
+Note that the home directory you are in is autmounted from the NFS server on idm-1.
+-bash-4.2$ pwd 
+/home/power1 
+-bash-4.2$ ls 
+power1.home 
+-bash-4.2$ mount | grep home 
+auto.home on /home type autofs ...
+idm-1.example.com:/exports/homes/power1 on /home/power1 type nfs4 ... 
+Module 2.3: Host Based Access Control
+Red Hat IdM allows server-side configuration of Host Based Access Control, allowing users access to hosts via specific services.  SSSD also provides client-side configuration of Host Based Access Control, regardless of the type of domain it is connected to.
+Activity: Investigate IdM Host Based Access Control
+Log out of www-7, and prove that you can log in to www-7 as power1 (who is a member of web-admins):
+[user@client ~]$ ssh power1@www-7.example.com
+
+Log out of www-7, and try to login in as help1:
+[user@client ~]$ ssh help1@www-7.example.com
+...
+Connection closed by 172.16.0.53 
+
+Note that power1 was able to log in, but help1 was not.  A Host Based Access Control rule was which allows members of the demo-users group to SSH and use sudo on all servers using the following commands  (also viewable in Web UI at Policy->Host Based Access Control):
+	ipa hbacsvcgroup-add --desc="Login Services" login-services
+	ipa hbacsvcgroup-add-member login-services --hbacsvcs=sshd --hbacsvcs=sudo
+
+	ipa hbacrule-add www-login-access-rule
+
+	ipa hbacrule-add-user --groups=web-admins www-login-access-rule
+	ipa hbacrule-add-service --hbacsvcgroups=login-services www-login-access-rule
+	ipa hbacrule-add-host --hostgroups=www-servers www-login-access-rule
+
+Note that non-IdM domains (such as Active Directory or other LDAP servers) do not provide a compatible HBAC mechanism; however, in RHEL 7, SSSD supports an Access Control Provider that can be used for client-side configuration.  For more detail on this functionality, see https://wiki.idm.lab.bos.redhat.com/export/idmwiki/Image:2014-SSSD-access-control.odp .
+Module 2.3: Sudo
+Activity: Configure www-7 to use sudo rules provided by IdM
+SSH as root into www-7 to perform the following activities.
+Configure the system to rely on IdM for sudoers information by editing /etc/nsswitch.conf and /etc/sssd/sssd.conf.
+/etc/nsswitch.conf
+sudoers: sss file 
+
+/etc/sssd/sssd.conf
+services = nss, pam, autofs, ssh, sudo 
+
+Restart sssd to make these new settings take effect:
+[root@www-7 ~]# systemctl restart sssd 
+
+Review the sudo access granted to power1:
+[root@www-7 ~]# sudo -U power1 -ll 
+User power1 may run the following commands on this host: 
+    RunAsUsers: root 
+    Commands: 
+	/sbin/lvs 
+	/sbin/vgs 
+	/sbin/pvs 
+You have new mail in /var/spool/mail/root 
+
+Log out from www-7, and log in again as power1.
+Try to view the logical volumes available on this system:
+[power1@www-7 ~]$ lvs
+  WARNING: Running as a non-root user. Functionality may be unavailable. 
+  /dev/mapper/control: open failed: Permission denied 
+  Failure to communicate with kernel device-mapper driver. 
+  No volume groups found 
+
+Try again, using sudo:
+[power1@www-7 ~]$ sudo lvs
+ No volume groups found 
+
+Note that the non-root warning was gone, as power1 has successfully escalated to root using sudo.
+Note that this sudo access was granted by using the following (also viewable in Web UI at Policy->Sudo):
+ipa sudocmdgroup-add --desc "LVM Scan Commands" lvmcmds 
+
+ipa sudocmd-add /sbin/lvs
+ipa sudocmd-add /sbin/vgs
+ipa sudocmd-add /sbin/pvs
+
+ipa sudocmdgroup-add-member --sudocmds=/sbin/lvs --sudocmds=/sbin/vgs --sudocmds=/sbin/pvs lvmcmds
+
+ipa sudorule-add lvmrule
+ipa sudorule-add-allow-command --sudocmdgroups=lvmcmds lvmrule 
+ipa sudorule-add-user --groups=power-users lvmrule 
+ipa sudorule-mod --hostcat='all' lvmrule
+Module 2.4: (Optional) Joining a RHEL 6 system to the IdM environment
+Activity: Install ipa-client and join a RHEL 6 system to IdM (Optional)
+Using a RHEL 6 system, SSH as root to perform the following activities.
+Install the ipa-client package and join the RHEL 6 system to the IdM environment:
+[root@server-rhel6 ~]# yum install -y ipa-client
+[root@server-rhel6 ~]# ipa-client-install --enable-dns-updates 
+Discovery was successful! 
+Hostname: server-rhel6.example.com 
+Realm: EXAMPLE.COM 
+DNS Domain: example.com 
+IPA Server: idm-2.example.com 
+BaseDN: dc=example,dc=com 
+
+Continue to configure the system with these values? [no]: yes 
+User authorized to enroll computers: admin 
+Synchronizing time with KDC... 
+Password for admin@EXAMPLE.COM: <Enter password>
+...
+Client configuration complete.
+
+Confirm that the system is part of the IdM environment:
+[root@server-rhel6 ~]# getent passwd user2
+user6:*:1538200007:1538200007:User2 Users:/home/user2:/bin/sh 
+
+Section 3: (Optional) Active Directory
+Active Directory is beyond the scope of most Solution Architect demos.  However, it is important to understand the relationship between SSSD, IdM, and Active Directory.
+Module 3.0: “Direct” AD access with SSSD, realmd, and Active Directory
+In Module 2.1, realmd was used to join a RHEL 7 system to an IdM domain.  Similarly, realmd can be used to connect a RHEL 7 system directly to an Active Directory.  realmd will discover the details of the Active Directory, advise the software that needs to be installed, and configure sssd appropriately.  The RHEL 7 system will then benefit from the users and groups stored in the Active Directory.  However, the RHEL 7 system will not gain the policy management (e.g., HBAC, sudo, automount) that IdM provides.  This is generally sufficient for environments with a small number of RHEL systems, and a mature Active Directory containing users and groups desirable for use on the RHEL systems.
+Module 3.1: “Indirect” AD access with IdM and Active Directory
+In Module 2.1, realmd was used to join a RHEL 7 system to an IdM domain.  This provides the RHEL system access to identity (users and groups) and policies.  However, environments that have a mature Active Directory in place may wish to continue to use the AD users and groups for the RHEL systems, instead of having to create new users a groups.  However, if the RHEL systems are of sufficient quantity, the benefits of IdM policy (e.g., HBAC, sudo, automount) may be great.  In this scenario, establishing a trust between IdM and AD has great value.  This allows users and groups from the Active Directory to be “trusted” for access to the RHEL systems, while still allowing the RHEL systems to join the IdM domain and benefit from IdM policy.
+Establishing the trust between IdM and AD requires installing the ipa trust tools then creating the trust relationship:
+[root@idm-1 ~]# kinit admin@EXAMPLE.COM
+[root@idm-1 ~]# yum install -y ipa-server-trust-ad
+[root@idm-1 ~]# ipa-adtrust-install
+[root@idm-1 ~]# ipa trust-add ad.test --admin Administrator --password
+Active directory domain administrator's password: <AD Admin's password>
+...
+  Trust status: Established and verified
+
+Note that this is a very simple process.  For more detailed information, review https://wiki.idm.lab.bos.redhat.com/export/idmwiki/Image:2014-trust.odp .
+Section 4: (Optional) Expanding the IdM Environment
+The Red Hat IdM environement can be expanded with additional IdM servers to provide both fault-tolerance and improved performance through load distribution.  Red Hat IdM supports a maximum of 20 IdM replicas, all writable masters (“Multi Master”).  Read-only replicas are not supported.  Any individual IdM server can replicate with 4 peers, allowing complex multi-geography topologies to be created as necessary.
+
+Module 7.1: Install IdM Replica
+(Note: No change from RHEL 6)
+This module is optional, necessary only for more complex, multi-node IdM environments.
+
+This module builds upon Module 1 by adding an additional IdM server, (a replica), to the environment.  This adds redundancy and load distribution to the single-node IdM environment built in Module 1.  This module requires installation of an additional RHEL 7 server named idm-2.example.com.  A small, Minimal Install as described in Section 0 is sufficient.
+Activity: Install IdM replica
+SSH as root into idm-1 to perform the following activities.
+
+Prepare the replica's information, supplying the FQDN and IP address of idm-2:
+[root@idm-1 ~]# ipa-replica-prepare idm-2.example.com --ip-address=x.x.x.x
+Directory Manager (existing master) password: (Enter Directory Manager's password)
+
+Preparing replica for idm-2.example.com from idm-1.example.com 
+...
+Packaging replica information into /var/lib/ipa/replica-info-idm-2.example.com.gpg 
+...
+The ipa-replica-prepare command was successful 
+
+Copy the replica information stored at /var/lib/ipa/replica-info-idm-2.example.com.gpg to idm-2, in /root
+
+SSH as root into idm-2 to perform the following activities.
+
+Verify that /etc/resolv.conf is configured to use the IP address of idm-1 as the nameserver.
+
+Update firewall to allow ports necessary for IdM:
+[root@idm-2 ~]# firewall-cmd --permanent \
+--add-port=389/tcp       \
+--add-port=636/tcp       \
+--add-port=80/tcp        \
+--add-port=443/tcp       \
+--add-port=88/tcp        \
+--add-port=88/udp        \
+--add-port=464/tcp       \
+--add-port=464/udp       \
+--add-port=53/udp        \
+--add-port=53/tcp        \
+--add-port=123/udp
+success
+
+[root@idm-2 ~]# firewall-cmd --reload
+success
+
+Install IdM server software and optional components:
+[root@idm-2 ~]# yum -y install ipa-server bind bind-dyndb-ldap 
+
+Perform installation of IdM replica.  Note that this is an interactive process which will prompt for additional information.  Answers are provided below in bold.
+[root@idm-2 ~]# ipa-replica-install --setup-dns --no-forwarders replica-info-idm-2.example.com.gpg
+Directory Manager (existing master) password: (Enter Password)
+ 
+Run connection check to master 
+
+(...)
+
+
+Confirm that the installation has been successful by attempting to obtain a TGT for the admin user.  Note that the capitalization of EXAMPLE.COM is important!
+[root@idm-2 ~]# kinit admin@EXAMPLE.COM
+Password for admin@EXAMPLE.COM: (Enter admin's password)
+
+[root@idm-2 ~]# klist
+Ticket cache: KEYRING:persistent:0:0
+Default principal: admin@EXAMPLE.COM
+
+Valid starting       Expires              Service principal
+01/01/2014 08:00:00  01/02/2014 08:00:00  krbtgt/EXAMPLE.COM@EXAMPLE.COM
+
+Confirm that the directory services are properly responding, and that the IdM server is a member of it's own environment.
+[root@idm-2 ~]# getent passwd user3 
+user3:*:1635800007:1635800007:User3 Demo:/home/user3:/bin/bash 
+Confirm that the IdM replication topology is recognized by both idm-1 and idm-1
+[root@idm-1 ~]# ipa-replica-manage list
+idm-1.example.com: master
+idm-2.example.com: master
+
+[root@idm-2 ~]# ipa-replica-manage list
+idm-1.example.com: master
+idm-2.example.com: master
+
+Congratulations -- you now have a 2 node IdM environment!
